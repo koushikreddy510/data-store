@@ -1,0 +1,6 @@
+fyers-apiv3
+requests
+pandas
+numpy
+certifi
+psycopg[binary]
