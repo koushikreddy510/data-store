@@ -13,6 +13,7 @@ Separate from OHLCV data — uses its own table.
 import re
 import time
 import argparse
+import os
 import requests
 from datetime import datetime
 from bs4 import BeautifulSoup
@@ -26,13 +27,26 @@ DB_CONFIG = {
     "password": "market_pass",
 }
 
+
+def _get_conn():
+    try:
+        from db_config import get_conn
+        return get_conn()
+    except ImportError:
+        return psycopg.connect(**DB_CONFIG)
+
+
 SCREENER_BASE = "https://www.screener.in/company"
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                  "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                  "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36",
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.9",
+    "Referer": "https://www.screener.in/",
+    "sec-ch-ua": '"Brave";v="147", "Not.A/Brand";v="8", "Chromium";v="147"',
+    "sec-ch-ua-mobile": "?0",
+    "sec-ch-ua-platform": '"macOS"',
 }
 
 SLEEP_BETWEEN = 1.0
@@ -216,9 +230,13 @@ def scrape_symbol(session: requests.Session, nse_symbol: str) -> dict:
     url = f"{SCREENER_BASE}/{nse_symbol}/consolidated/"
     try:
         resp = session.get(url, timeout=15)
+        if resp.status_code == 429:
+            return {"rate_limited": True, "status_code": 429, "quarterly": [], "annual": []}
         if resp.status_code == 404:
             url = f"{SCREENER_BASE}/{nse_symbol}/"
             resp = session.get(url, timeout=15)
+        if resp.status_code == 429:
+            return {"rate_limited": True, "status_code": 429, "quarterly": [], "annual": []}
         if resp.status_code != 200:
             return None
     except Exception as e:
@@ -226,7 +244,6 @@ def scrape_symbol(session: requests.Session, nse_symbol: str) -> dict:
         return None
 
     soup = BeautifulSoup(resp.text, "html.parser")
-
     company_name = ""
     h1 = soup.find("h1")
     if h1:
@@ -234,6 +251,15 @@ def scrape_symbol(session: requests.Session, nse_symbol: str) -> dict:
 
     quarterly = extract_table_data(soup, "quarters")
     annual = extract_table_data(soup, "profit-loss")
+    lower = resp.text[:5000].lower()
+    page_title = soup.find("title").get_text(" ", strip=True).lower() if soup.find("title") else ""
+    if (
+        not quarterly
+        and not annual
+        and not company_name
+        and ("login" in page_title or "register" in page_title or "create account" in lower)
+    ):
+        return {"login_required": True, "quarterly": [], "annual": []}
 
     ratios = extract_ratios(soup)
 
@@ -351,7 +377,7 @@ def main():
     parser.add_argument("--sleep", type=float, default=SLEEP_BETWEEN, help="Sleep between requests")
     args = parser.parse_args()
 
-    conn = psycopg.connect(**DB_CONFIG)
+    conn = _get_conn()
     conn.autocommit = False
 
     if args.symbol:
@@ -367,7 +393,11 @@ def main():
     print(f"Scraping financials for {len(symbols)} symbols from screener.in")
 
     session = requests.Session()
+    session.trust_env = False
     session.headers.update(HEADERS)
+    cookie_str = os.getenv("SCREENER_SESSION_COOKIE", "").strip()
+    if cookie_str:
+        session.headers["Cookie"] = cookie_str
 
     success = 0
     failed = 0

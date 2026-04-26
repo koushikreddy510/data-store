@@ -91,7 +91,11 @@ except Exception as e:
 
 print("Token is valid. Proceeding...")
 
-conn = psycopg.connect(**DB_CONFIG)
+try:
+    from db_config import get_conn
+    conn = get_conn()
+except ImportError:
+    conn = psycopg.connect(**DB_CONFIG)
 conn.autocommit = False
 
 

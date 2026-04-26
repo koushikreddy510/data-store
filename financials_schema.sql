@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS stock_financials (
     revenue_growth_pct DOUBLE PRECISION,
     profit_growth_pct DOUBLE PRECISION,
 
+    source TEXT DEFAULT 'screener.in',
     scraped_at TIMESTAMP DEFAULT now(),
 
     UNIQUE(tradingsymbol, result_type, period)
