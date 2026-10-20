@@ -71,6 +71,11 @@ def run_ohlcv_1d():
     return _run_script("ohlcv_1d_job.py")
 
 
+@app.post("/run/financials-yfinance")
+def run_financials_yfinance(limit: int = 0, workers: int = 3, sleep: float = 0.5):
+    return _run_script("yfinance_financials_job.py", "--limit", str(limit), "--workers", str(workers), "--sleep", str(sleep))
+
+
 @app.post("/run/symbols-to-postgres")
 def run_symbols():
     return _run_script("symbols_to_postgres.py")

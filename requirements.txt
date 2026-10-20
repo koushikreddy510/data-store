@@ -4,3 +4,4 @@ pandas
 numpy
 certifi
 psycopg[binary]
+yfinance

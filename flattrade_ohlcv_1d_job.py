@@ -44,11 +44,10 @@ if not USER_ID or not TOKEN:
 
 def _ft_post(endpoint: str, payload: dict):
     body = {"uid": USER_ID, **payload}
-    resp = http.post(
-        f"{BASE_URL}/{endpoint}",
-        data={"jData": json.dumps(body, separators=(",", ":")), "jKey": TOKEN},
-        timeout=30,
-    )
+    # Send as raw string — Flattrade's REST API expects un-encoded JSON in jData;
+    # passing a dict to requests would URL-encode { } " which the server rejects.
+    raw = f"jData={json.dumps(body, separators=(',', ':'))}&jKey={TOKEN}"
+    resp = http.post(f"{BASE_URL}/{endpoint}", data=raw.encode(), timeout=30)
     resp.raise_for_status()
     data = resp.json()
     if isinstance(data, dict) and str(data.get("stat", "")).lower() == "not_ok":
@@ -58,18 +57,25 @@ def _ft_post(endpoint: str, payload: dict):
 
 # ---------- Token resolution (cached in symbols.flattrade_token) ----------
 
-def _resolve_token(tradingsymbol: str, conn) -> str | None:
-    """Return Flattrade broker token for an NSE tradingsymbol, caching in DB."""
+def _resolve_token(tradingsymbol: str, conn) -> tuple[str, str] | tuple[None, None]:
+    """Return (exchange, broker_token) for a tradingsymbol like 'NSE:SBIN-EQ', caching in DB."""
     with conn.cursor() as cur:
         cur.execute("SELECT flattrade_token FROM symbols WHERE tradingsymbol = %s", (tradingsymbol,))
         row = cur.fetchone()
         if row and row[0]:
-            return row[0]
+            # Cached: derive exchange from symbol prefix
+            exch = tradingsymbol.split(":")[0] if ":" in tradingsymbol else "NSE"
+            return exch, row[0]
+    # Strip exchange prefix: "NSE:SBIN-EQ" -> exch="NSE", tsym="SBIN-EQ"
+    if ":" in tradingsymbol:
+        exch, tsym = tradingsymbol.split(":", 1)
+    else:
+        exch, tsym = "NSE", tradingsymbol
     try:
-        data = _ft_post("SearchScrip", {"stext": tradingsymbol, "exch": "NSE"})
-        matches = [m for m in (data.get("values") or []) if m.get("tsym") == tradingsymbol]
+        data = _ft_post("SearchScrip", {"stext": tsym, "exch": exch})
+        matches = [m for m in (data.get("values") or []) if m.get("tsym") == tsym]
         if not matches:
-            return None
+            return None, None
         tok = str(matches[0]["token"])
         with conn.cursor() as cur:
             cur.execute(
@@ -77,10 +83,10 @@ def _resolve_token(tradingsymbol: str, conn) -> str | None:
                 (tok, tradingsymbol),
             )
         conn.commit()
-        return tok
+        return exch, tok
     except Exception as e:
         log.warning("SearchScrip failed for %s: %s", tradingsymbol, e)
-        return None
+        return None, None
 
 
 # ---------- Candle parsing ------------------------------------------------
@@ -109,14 +115,14 @@ DO UPDATE SET
 """
 
 
-def _fetch_and_upsert(tradingsymbol: str, ft_token: str, conn, today: date) -> int:
+def _fetch_and_upsert(tradingsymbol: str, exch: str, ft_token: str, conn, today: date) -> int:
     start_ts = int(datetime.combine(today - timedelta(days=HISTORY_DAYS), datetime.min.time()).timestamp())
     end_ts = int(datetime.combine(today + timedelta(days=1), datetime.min.time()).timestamp())
 
     # Daily bars: one request covers the full history window
     try:
         rows = _ft_post("TPSeries", {
-            "exch": "NSE",
+            "exch": exch,
             "token": ft_token,
             "st": str(start_ts),
             "et": str(end_ts),
@@ -167,14 +173,14 @@ def main():
     success = failed = skipped = 0
 
     for i, sym in enumerate(symbols, 1):
-        ft_token = _resolve_token(sym, conn)
+        exch, ft_token = _resolve_token(sym, conn)
         if not ft_token:
             skipped += 1
             time.sleep(SLEEP_BETWEEN_CALLS)
             continue
 
         try:
-            n = _fetch_and_upsert(sym, ft_token, conn, today)
+            n = _fetch_and_upsert(sym, exch, ft_token, conn, today)
             success += 1
             if i % 100 == 0:
                 log.info("[%d/%d] last=%s rows=%d  ok=%d skip=%d fail=%d",
