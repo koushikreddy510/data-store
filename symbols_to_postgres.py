@@ -36,8 +36,9 @@ df = pd.read_csv(StringIO(resp.text), header=None)
 symbols_df = df[[0, 1, 5, 9]].copy()
 symbols_df.columns = ["fyers_token", "name", "isin", "tradingsymbol"]
 
-# Keep only NSE equity (-EQ) if you want
-symbols_df = symbols_df[symbols_df["tradingsymbol"].str.endswith("-EQ")]
+# Include EQ (normal), BE (trade-to-trade / new IPOs), and SM (SME listings)
+ALLOWED_SERIES = ("-EQ", "-BE", "-SM")
+symbols_df = symbols_df[symbols_df["tradingsymbol"].str.endswith(ALLOWED_SERIES)]
 
 # Drop rows with missing tradingsymbol just in case
 symbols_df = symbols_df.dropna(subset=["tradingsymbol"])
