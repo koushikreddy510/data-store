@@ -121,13 +121,15 @@ def _extract_rows(tradingsymbol: str, yf_sym: str, stmt: pd.DataFrame, result_ty
         else:
             period_label = f"FY{period_dt.year}"
 
-        revenue     = _row(s, "Total Revenue")
-        op_income   = _row(s, "Operating Income", "EBIT")
-        net_income  = _row(s, "Net Income", "Net Income Common Stockholders")
-        expenses    = _row(s, "Total Expenses")
-        interest    = _row(s, "Interest Expense", "Interest Expense Non Operating")
-        depreciation= _row(s, "Reconciled Depreciation")
-        eps         = _row(s, "Diluted EPS", "Basic EPS")
+        def _cr(v): return round(v / 1e7, 2) if v is not None else None  # INR → Crores
+
+        revenue     = _cr(_row(s, "Total Revenue"))
+        op_income   = _cr(_row(s, "Operating Income", "EBIT"))
+        net_income  = _cr(_row(s, "Net Income", "Net Income Common Stockholders"))
+        expenses    = _cr(_row(s, "Total Expenses"))
+        interest    = _cr(_row(s, "Interest Expense", "Interest Expense Non Operating"))
+        depreciation= _cr(_row(s, "Reconciled Depreciation"))
+        eps         = _row(s, "Diluted EPS", "Basic EPS")  # per-share, keep as INR
 
         opm_pct = (op_income / revenue * 100) if revenue and op_income else None
         npm_pct = (net_income / revenue * 100) if revenue and net_income else None
