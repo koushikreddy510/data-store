@@ -361,36 +361,32 @@ def upsert_financials(conn, tradingsymbol: str, nse_symbol: str, data: dict):
 
 
 def extract_nse_symbol(tradingsymbol: str) -> str:
-    """NSE:SBIN-EQ -> SBIN"""
+    """NSE:SBIN-EQ / NSE:E2E-BE / NSE:XYZ-SM -> SBIN / E2E / XYZ"""
     sym = tradingsymbol
     if ":" in sym:
         sym = sym.split(":")[1]
-    if sym.endswith("-EQ"):
-        sym = sym[:-3]
+    for suffix in ("-EQ", "-BE", "-BL", "-SM", "-IL", "-N1", "-N2", "-N3", "-N4"):
+        if sym.endswith(suffix):
+            sym = sym[:-len(suffix)]
+            break
     return sym
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Scrape financials from screener.in")
-    parser.add_argument("--limit", type=int, default=0, help="Limit number of symbols (0 = all)")
-    parser.add_argument("--symbol", type=str, default="", help="Scrape a single NSE symbol")
-    parser.add_argument("--sleep", type=float, default=SLEEP_BETWEEN, help="Sleep between requests")
-    args = parser.parse_args()
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
-    conn = _get_conn()
-    conn.autocommit = False
+_print_lock = threading.Lock()
 
-    if args.symbol:
-        symbols = [(f"NSE:{args.symbol}-EQ", None)]
-    else:
-        with conn.cursor() as cur:
-            cur.execute("SELECT tradingsymbol, isin FROM symbols ORDER BY tradingsymbol;")
-            symbols = cur.fetchall()
 
-    if args.limit > 0:
-        symbols = symbols[:args.limit]
+def _safe_print(*args, **kwargs):
+    with _print_lock:
+        print(*args, **kwargs)
 
-    print(f"Scraping financials for {len(symbols)} symbols from screener.in")
+
+def _scrape_one(row: tuple, sleep_sec: float) -> tuple[str, str, str, int]:
+    """Worker: scrape one symbol. Returns (tradingsymbol, nse_sym, status, count)."""
+    tradingsymbol = row[0]
+    nse_sym = extract_nse_symbol(tradingsymbol)
 
     session = requests.Session()
     session.trust_env = False
@@ -399,50 +395,76 @@ def main():
     if cookie_str:
         session.headers["Cookie"] = cookie_str
 
-    success = 0
-    failed = 0
-    skipped = 0
+    try:
+        data = scrape_symbol(session, nse_sym)
+        if not data:
+            return tradingsymbol, nse_sym, "skip", 0
 
-    for i, row in enumerate(symbols, start=1):
-        tradingsymbol = row[0]
-        nse_sym = extract_nse_symbol(tradingsymbol)
-        print(f"[{i}/{len(symbols)}] {nse_sym} ...", end=" ", flush=True)
+        q_count = len(data.get("quarterly", []))
+        a_count = len(data.get("annual", []))
+        if q_count == 0 and a_count == 0:
+            return tradingsymbol, nse_sym, "skip", 0
 
-        try:
-            data = scrape_symbol(session, nse_sym)
-            if not data:
-                print("SKIP (no data)")
-                skipped += 1
-                time.sleep(args.sleep)
-                continue
+        conn = _get_conn()
+        conn.autocommit = False
+        count = upsert_financials(conn, tradingsymbol, nse_sym, data)
+        conn.close()
 
-            q_count = len(data.get("quarterly", []))
-            a_count = len(data.get("annual", []))
+        ratios = data.get("ratios", {})
+        pe = ratios.get("pe_ratio", "-")
+        mcap = ratios.get("market_cap_cr", "-")
+        return tradingsymbol, nse_sym, f"ok Q:{q_count} A:{a_count} PE:{pe} MCap:{mcap}", count
 
-            if q_count == 0 and a_count == 0:
-                print("SKIP (no results tables)")
-                skipped += 1
-                time.sleep(args.sleep)
-                continue
+    except Exception as e:
+        return tradingsymbol, nse_sym, f"error {e}", 0
+    finally:
+        time.sleep(sleep_sec)
 
-            count = upsert_financials(conn, tradingsymbol, nse_sym, data)
-            ratios = data.get("ratios", {})
-            pe = ratios.get("pe_ratio", "-")
-            mcap = ratios.get("market_cap_cr", "-")
-            print(f"OK ({count} rows, Q:{q_count} A:{a_count}, PE:{pe}, MCap:{mcap})")
-            success += 1
 
-        except Exception as e:
-            conn.rollback()
-            print(f"ERROR: {e}")
-            failed += 1
+def main():
+    parser = argparse.ArgumentParser(description="Scrape financials from screener.in")
+    parser.add_argument("--limit", type=int, default=0, help="Limit number of symbols (0 = all)")
+    parser.add_argument("--symbol", type=str, default="", help="Scrape a single NSE symbol")
+    parser.add_argument("--sleep", type=float, default=SLEEP_BETWEEN, help="Sleep per worker between requests")
+    parser.add_argument("--workers", type=int, default=5, help="Parallel workers (default 5)")
+    args = parser.parse_args()
 
-        time.sleep(args.sleep)
-
-        if i % 50 == 0:
-            print(f"  --- Progress: {success} OK, {failed} ERR, {skipped} SKIP ---")
-
+    conn = _get_conn()
+    if args.symbol:
+        symbols = [(f"NSE:{args.symbol}-EQ", None)]
+    else:
+        with conn.cursor() as cur:
+            cur.execute("SELECT tradingsymbol, isin FROM symbols ORDER BY tradingsymbol;")
+            symbols = cur.fetchall()
     conn.close()
+
+    if args.limit > 0:
+        symbols = symbols[:args.limit]
+
+    total = len(symbols)
+    print(f"Scraping financials for {total} symbols from screener.in ({args.workers} workers, {args.sleep}s sleep)")
+
+    success = failed = skipped = 0
+    done = 0
+
+    with ThreadPoolExecutor(max_workers=args.workers) as pool:
+        futures = {pool.submit(_scrape_one, row, args.sleep): row for row in symbols}
+        for fut in as_completed(futures):
+            done += 1
+            tradingsymbol, nse_sym, status, count = fut.result()
+            if status.startswith("ok"):
+                success += 1
+                _safe_print(f"[{done}/{total}] {nse_sym} ... OK ({count} rows, {status[3:]})")
+            elif status.startswith("error"):
+                failed += 1
+                _safe_print(f"[{done}/{total}] {nse_sym} ... ERROR: {status[6:]}")
+            else:
+                skipped += 1
+                _safe_print(f"[{done}/{total}] {nse_sym} ... SKIP")
+
+            if done % 50 == 0:
+                _safe_print(f"  --- Progress: {success} OK, {failed} ERR, {skipped} SKIP ---")
+
     print(f"\nDone. Success: {success}, Failed: {failed}, Skipped: {skipped}")
 
 

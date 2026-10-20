@@ -62,13 +62,13 @@ def run_scrape_latest_results(days: int = 1):
 
 
 @app.post("/run/scrape-financials")
-def run_scrape_financials(limit: int = 200, sleep: float = 1.5):
-    return _run_script("scrape_financials.py", "--limit", str(limit), "--sleep", str(sleep))
+def run_scrape_financials(limit: int = 0, sleep: float = 1.0, workers: int = 5):
+    return _run_script("scrape_financials.py", "--limit", str(limit), "--sleep", str(sleep), "--workers", str(workers))
 
 
 @app.post("/run/ohlcv-1d")
 def run_ohlcv_1d():
-    return _run_script("flattrade_ohlcv_1d_job.py")
+    return _run_script("ohlcv_1d_job.py")
 
 
 @app.post("/run/symbols-to-postgres")
