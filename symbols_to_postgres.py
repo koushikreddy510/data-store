@@ -2,18 +2,8 @@ import pandas as pd
 import requests
 import certifi
 from io import StringIO
-import psycopg
 
-# --------------------
-# Config
-# --------------------
-DB_CONFIG = {
-    "host": "localhost",
-    "port": 5432,
-    "dbname": "market",
-    "user": "market_user",
-    "password": "market_pass",
-}
+from db_config import get_conn
 
 FYERS_SYMBOL_MASTER_URL = "https://public.fyers.in/sym_details/NSE_CM.csv"
 
@@ -49,7 +39,7 @@ print(symbols_df.head())
 # --------------------
 # Insert / Upsert into Postgres
 # --------------------
-conn = psycopg.connect(**DB_CONFIG)
+conn = get_conn()
 conn.autocommit = False
 
 upsert_sql = """
