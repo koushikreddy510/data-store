@@ -66,6 +66,11 @@ def run_scrape_financials(limit: int = 200, sleep: float = 1.5):
     return _run_script("scrape_financials.py", "--limit", str(limit), "--sleep", str(sleep))
 
 
+@app.post("/run/ohlcv-1d")
+def run_ohlcv_1d():
+    return _run_script("flattrade_ohlcv_1d_job.py")
+
+
 @app.post("/run/symbols-to-postgres")
 def run_symbols():
     return _run_script("symbols_to_postgres.py")
