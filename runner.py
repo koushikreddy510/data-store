@@ -76,6 +76,12 @@ def run_financials_yfinance(limit: int = 0, workers: int = 3, sleep: float = 0.5
     return _run_script("yfinance_financials_job.py", "--limit", str(limit), "--workers", str(workers), "--sleep", str(sleep))
 
 
+@app.post("/run/enrich-sectors-yfinance")
+def run_enrich_sectors_yfinance(limit: int = 0, workers: int = 3, sleep: float = 0.3, force: bool = False):
+    extra = ["--force"] if force else []
+    return _run_script("enrich_sectors_yfinance.py", "--limit", str(limit), "--workers", str(workers), "--sleep", str(sleep), *extra)
+
+
 @app.post("/run/symbols-to-postgres")
 def run_symbols():
     return _run_script("symbols_to_postgres.py")
