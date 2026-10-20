@@ -47,10 +47,15 @@ def _fetch_one(tradingsymbol: str, sleep: float) -> tuple[str, str | None, str]:
         return tradingsymbol, None, "skip"
     try:
         info = yf.Ticker(yf_sym).info or {}
-        sector = info.get("sector") or info.get("sectorDisp") or None
+        # Prefer the granular `industry` field (e.g. "Banks—Regional", "Steel") over the
+        # broad 11-category `sector` (e.g. "Financial Services"). The terminal's sector_groups.py
+        # maps industry → parent sector so the Sectors view still groups them properly.
+        industry = info.get("industry") or info.get("industryDisp") or None
+        sector   = info.get("sector")   or info.get("sectorDisp")   or None
+        value    = industry or sector or None
         if sleep > 0:
             time.sleep(sleep)
-        return tradingsymbol, sector, "ok"
+        return tradingsymbol, value, "ok"
     except Exception as e:
         return tradingsymbol, None, f"error:{e}"
 
