@@ -87,8 +87,8 @@ def main():
     update_sql = """
     UPDATE symbols
        SET market_cap = COALESCE(NULLIF(%s, 0), market_cap),   -- NSE can answer without figures (e.g. from a server): never store 0
-           listing_date = %s,
-           sector = %s,
+           listing_date = COALESCE(%s, listing_date),
+           sector = COALESCE(NULLIF(%s, ''), sector),
            updated_at = now()
      WHERE tradingsymbol = %s;
     """
