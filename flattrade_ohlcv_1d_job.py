@@ -192,9 +192,9 @@ def main():
 
         time.sleep(SLEEP_BETWEEN_CALLS)
 
-    # Retention: keep just over a year of history
+    # Retention: ~4 years, so backtests have a year of warm-up (52-week high, 200-day average) before a 3-year window
     with conn.cursor() as cur:
-        cur.execute("DELETE FROM ohlcv_1d WHERE date < CURRENT_DATE - INTERVAL '400 days'")
+        cur.execute("DELETE FROM ohlcv_1d WHERE date < CURRENT_DATE - INTERVAL '1500 days'")
         deleted = cur.rowcount
     conn.commit()
     conn.close()

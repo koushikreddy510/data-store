@@ -166,10 +166,10 @@ def main():
 
         time.sleep(SLEEP_BETWEEN_CALLS)
 
-    # Retention cleanup: keep only ~1 year
+    # Retention cleanup: ~4 years (backtests need a year of warm-up before a 3-year window)
     with conn.cursor() as cur:
         cur.execute(
-            "DELETE FROM ohlcv_1d WHERE date < CURRENT_DATE - INTERVAL '370 days';"
+            "DELETE FROM ohlcv_1d WHERE date < CURRENT_DATE - INTERVAL '1500 days';"
         )
         deleted = cur.rowcount
     conn.commit()
