@@ -26,7 +26,8 @@ CREATE TABLE IF NOT EXISTS commodity_ohlcv_1d (
   PRIMARY KEY (tradingsymbol, date)
 );
 CREATE INDEX IF NOT EXISTS idx_commodity_ohlcv_1d_date ON commodity_ohlcv_1d(date);
-CREATE INDEX IF NOT EXISTS idx_commodity_ohlcv_1d_symbol ON commodity_ohlcv_1d(tradingsymbol);
+-- the primary key (tradingsymbol, date) already serves lookups by symbol; a second index on tradingsymbol only slows writes
+DROP INDEX IF EXISTS idx_commodity_ohlcv_1d_symbol;
 
 -- 4H timeframe
 CREATE TABLE IF NOT EXISTS commodity_ohlcv_4h (
